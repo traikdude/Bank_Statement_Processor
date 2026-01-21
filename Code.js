@@ -148,6 +148,8 @@ function onOpen() {
         .addItem('Export Selected Range', 'exportSelectedRange'))
       .addSeparator()
       .addSubMenu(ui.createMenu('🔗 Quick Links')
+        .addItem('🌐 Open Dashboard (Web App)', 'openDashboard')
+        .addSeparator()
         .addItem('📁 Input Folder (PDFs)', 'openInputFolder')
         .addItem('✅ Processed Folder', 'openProcessedFolder')
         .addItem('📤 Output Folder (CSVs)', 'openOutputFolder')
@@ -2251,6 +2253,19 @@ console.log('✅ Bank Statement Processor loaded successfully!');
 // =============================================================================
 // 🐍 PYTHON INTEGRATION TOOLS & HELPERS
 // =============================================================================
+
+/**
+ * Opens the Dashboard Web App in a new browser tab
+ */
+function openDashboard() {
+  const deploymentId = 'AKfycby99l7g2qR-C5bKIFVYX98umQ20Q9DJXaIKxsiZePJFx0En5VvJXI4GRWEadA3tC9VDBA';
+  const url = 'https://script.google.com/macros/s/' + deploymentId + '/exec';
+  const htmlOutput = HtmlService
+    .createHtmlOutput('<script>window.open("' + url + '", "_blank"); google.script.host.close();</script>')
+    .setWidth(100)
+    .setHeight(100);
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'Opening Dashboard...');
+}
 
 function openColabNotebook() {
   const url = 'https://colab.research.google.com/drive/15azpbyehCWpjAySUW7SfZDdWPujul00B?usp=sharing';
