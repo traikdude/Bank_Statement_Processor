@@ -1372,6 +1372,48 @@ function setupTransactionsSheet(sheet) {
   sheet.getRange(2, 7, 1000, 1).setNumberFormat(CONFIG.FORMAT.CURRENCY_FORMAT);
 }
 
+/**
+ * Ensures the Transactions sheet has proper headers
+ * Safe to call multiple times - only adds headers if row 1 is empty
+ */
+function ensureTransactionHeaders() {
+  try {
+    const ss = getSpreadsheet();
+    let sheet = ss.getSheetByName(CONFIG.SPREADSHEET.TRANSACTIONS_SHEET);
+
+    // Create sheet if it doesn't exist
+    if (!sheet) {
+      sheet = ss.insertSheet(CONFIG.SPREADSHEET.TRANSACTIONS_SHEET);
+      console.log('📋 Created Transactions sheet');
+    }
+
+    // Check if headers already exist
+    const firstCell = sheet.getRange(1, 1).getValue();
+    if (firstCell === 'ID') {
+      console.log('✅ Headers already exist');
+      SpreadsheetApp.getUi().alert('✅ Headers already exist!', 'The Transactions sheet already has proper headers.', SpreadsheetApp.getUi().ButtonSet.OK);
+      return;
+    }
+
+    // If row 1 is empty, add headers
+    if (!firstCell || firstCell.toString().trim() === '') {
+      setupTransactionsSheet(sheet);
+      console.log('✅ Headers added successfully');
+      SpreadsheetApp.getUi().alert('✅ Headers Added!', 'Transaction headers have been added to row 1.', SpreadsheetApp.getUi().ButtonSet.OK);
+    } else {
+      // Row 1 has data but not headers - insert row and add headers
+      sheet.insertRowBefore(1);
+      setupTransactionsSheet(sheet);
+      console.log('✅ Headers inserted above existing data');
+      SpreadsheetApp.getUi().alert('✅ Headers Inserted!', 'Headers have been inserted above your existing data.', SpreadsheetApp.getUi().ButtonSet.OK);
+    }
+
+  } catch (error) {
+    console.error('❌ Error ensuring headers:', error);
+    SpreadsheetApp.getUi().alert('❌ Error', 'Failed to add headers: ' + error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+}
+
 function setupSummarySheet(sheet) {
   sheet.getRange('A1').setValue('📊 Bank Statement Summary Dashboard').setFontSize(18).setFontWeight('bold');
   const overviewHeaders = ['Metric', 'Value'];
