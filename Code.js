@@ -2106,11 +2106,322 @@ function openGitHubRepo() {
   SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'Opening GitHub...');
 }
 
-function loadSettings() {
-  // Placeholder for settings loading if needed separately
-  // Currently settings are in CONFIG
+// =============================================================================
+// 🌐 WEB APP DASHBOARD HANDLERS (doGet / doPost)
+// =============================================================================
+
+/**
+ * Handles GET requests to the web app - Returns Dashboard HTML
+ * @param {Object} e - Event object with query parameters
+ * @returns {HtmlOutput} Dashboard HTML page
+ */
+function doGet(e) {
+  try {
+    console.log('🌐 Web App GET request received');
+
+    // Get dashboard data
+    const dashboardData = getDashboardData();
+
+    // Create HTML template
+    const template = HtmlService.createTemplateFromFile('Dashboard');
+    template.data = dashboardData;
+
+    return template.evaluate()
+      .setTitle('Bank Statement Processor - Dashboard')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+
+  } catch (error) {
+    console.error('❌ doGet error:', error);
+
+    // Fallback: Return simple status page
+    return HtmlService.createHtmlOutput(generateFallbackDashboard())
+      .setTitle('Bank Statement Processor')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
 }
 
-function initializeSpreadsheet() {
-  // Setup standard sheets
+/**
+ * Handles POST requests to the web app - API endpoint
+ * @param {Object} e - Event object with postData
+ * @returns {ContentService.TextOutput} JSON response
+ */
+function doPost(e) {
+  try {
+    console.log('🌐 Web App POST request received');
+
+    const params = JSON.parse(e.postData.contents);
+    const action = params.action || 'status';
+
+    let response = { success: true, timestamp: new Date().toISOString() };
+
+    switch (action) {
+      case 'status':
+        response.data = getDashboardData();
+        break;
+
+      case 'process':
+        // Trigger processing (async)
+        const result = processAllStatements({
+          appendMode: true,
+          duplicateCheck: true,
+          autoCategory: true,
+          moveProcessed: false
+        });
+        response.data = { message: result };
+        break;
+
+      case 'health':
+        response.data = runHealthCheck();
+        break;
+
+      default:
+        response.success = false;
+        response.error = 'Unknown action: ' + action;
+    }
+
+    return ContentService.createTextOutput(JSON.stringify(response))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (error) {
+    console.error('❌ doPost error:', error);
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
 }
+
+/**
+ * Generates dashboard data for the web app
+ * @returns {Object} Dashboard statistics
+ */
+function getDashboardData() {
+  try {
+    const ss = getSpreadsheet();
+    const transSheet = ss.getSheetByName(CONFIG.SPREADSHEET.TRANSACTIONS_SHEET);
+    const logSheet = ss.getSheetByName(CONFIG.SPREADSHEET.LOG_SHEET);
+
+    let stats = {
+      projectName: 'Bank Statement Processor',
+      scriptId: SCRIPT_ID,
+      spreadsheetId: SPREADSHEET_ID,
+      lastUpdated: new Date().toISOString(),
+      transactions: { total: 0, income: 0, expenses: 0 },
+      processingLog: [],
+      status: 'operational'
+    };
+
+    // Get transaction stats
+    if (transSheet && transSheet.getLastRow() > 1) {
+      const data = transSheet.getDataRange().getValues();
+      stats.transactions.total = data.length - 1;
+
+      for (let i = 1; i < data.length; i++) {
+        const amount = parseFloat(data[i][4]) || 0;
+        if (amount >= 0) {
+          stats.transactions.income += amount;
+        } else {
+          stats.transactions.expenses += Math.abs(amount);
+        }
+      }
+    }
+
+    // Get recent log entries
+    if (logSheet && logSheet.getLastRow() > 1) {
+      const logData = logSheet.getRange(
+        Math.max(2, logSheet.getLastRow() - 9),
+        1,
+        Math.min(10, logSheet.getLastRow() - 1),
+        4
+      ).getValues();
+
+      stats.processingLog = logData.reverse().map(row => ({
+        timestamp: row[0],
+        source: row[1],
+        message: row[2],
+        status: row[3]
+      }));
+    }
+
+    return stats;
+
+  } catch (error) {
+    console.error('❌ getDashboardData error:', error);
+    return {
+      projectName: 'Bank Statement Processor',
+      status: 'error',
+      error: error.message,
+      lastUpdated: new Date().toISOString()
+    };
+  }
+}
+
+/**
+ * Runs a health check on the system
+ * @returns {Object} Health check results
+ */
+function runHealthCheck() {
+  const results = {
+    timestamp: new Date().toISOString(),
+    checks: []
+  };
+
+  // Check 1: Spreadsheet access
+  try {
+    const ss = getSpreadsheet();
+    results.checks.push({ name: 'Spreadsheet Access', status: 'PASS', message: ss.getName() });
+  } catch (e) {
+    results.checks.push({ name: 'Spreadsheet Access', status: 'FAIL', message: e.message });
+  }
+
+  // Check 2: Input folder access
+  try {
+    const folder = DriveApp.getFolderById(CONFIG.FOLDERS.INPUT_PDF_FOLDER_ID);
+    results.checks.push({ name: 'Input Folder', status: 'PASS', message: folder.getName() });
+  } catch (e) {
+    results.checks.push({ name: 'Input Folder', status: 'FAIL', message: e.message });
+  }
+
+  // Check 3: Network connectivity
+  try {
+    UrlFetchApp.fetch('https://www.google.com', { muteHttpExceptions: true });
+    results.checks.push({ name: 'Network', status: 'PASS', message: 'Connected' });
+  } catch (e) {
+    results.checks.push({ name: 'Network', status: 'FAIL', message: e.message });
+  }
+
+  results.overall = results.checks.every(c => c.status === 'PASS') ? 'HEALTHY' : 'DEGRADED';
+  return results;
+}
+
+/**
+ * Generates fallback dashboard HTML when template is missing
+ * @returns {string} HTML string
+ */
+function generateFallbackDashboard() {
+  const data = getDashboardData();
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bank Statement Processor - Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      color: #e4e6eb;
+      padding: 20px;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 {
+      font-size: 2.5rem;
+      background: linear-gradient(90deg, #00d4ff, #7c4dff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 30px;
+      text-align: center;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.8rem;
+    }
+    .status-operational { background: #00c853; color: #fff; }
+    .status-error { background: #ff5252; color: #fff; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
+    .card {
+      background: rgba(255,255,255,0.05);
+      backdrop-filter: blur(10px);
+      border-radius: 16px;
+      padding: 24px;
+      border: 1px solid rgba(255,255,255,0.1);
+      transition: transform 0.3s, box-shadow 0.3s;
+    }
+    .card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 10px 40px rgba(0,212,255,0.2);
+    }
+    .card h3 { color: #00d4ff; margin-bottom: 15px; font-size: 1.1rem; }
+    .card .value { font-size: 2rem; font-weight: 700; color: #fff; }
+    .card .label { font-size: 0.85rem; color: #888; margin-top: 5px; }
+    .income { color: #00e676 !important; }
+    .expense { color: #ff5252 !important; }
+    .links { margin-top: 30px; text-align: center; }
+    .links a {
+      display: inline-block;
+      margin: 10px;
+      padding: 12px 24px;
+      background: linear-gradient(135deg, #7c4dff, #00d4ff);
+      color: #fff;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: opacity 0.3s;
+    }
+    .links a:hover { opacity: 0.85; }
+    footer { text-align: center; margin-top: 40px; color: #666; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🏦 Bank Statement Processor</h1>
+    
+    <div style="text-align: center; margin-bottom: 30px;">
+      <span class="status-badge status-${data.status === 'operational' ? 'operational' : 'error'}">
+        ${data.status === 'operational' ? '✅ Operational' : '❌ Error'}
+      </span>
+    </div>
+    
+    <div class="cards">
+      <div class="card">
+        <h3>📊 Total Transactions</h3>
+        <div class="value">${data.transactions.total.toLocaleString()}</div>
+        <div class="label">Processed statements</div>
+      </div>
+      
+      <div class="card">
+        <h3>💰 Total Income</h3>
+        <div class="value income">$${data.transactions.income.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+        <div class="label">Credits & deposits</div>
+      </div>
+      
+      <div class="card">
+        <h3>💸 Total Expenses</h3>
+        <div class="value expense">$${data.transactions.expenses.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+        <div class="label">Debits & withdrawals</div>
+      </div>
+      
+      <div class="card">
+        <h3>🕐 Last Updated</h3>
+        <div class="value" style="font-size: 1.2rem;">${new Date(data.lastUpdated).toLocaleString()}</div>
+        <div class="label">System timestamp</div>
+      </div>
+    </div>
+    
+    <div class="links">
+      <a href="https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}" target="_blank">📊 Open Spreadsheet</a>
+      <a href="https://github.com/traikdude/Bank_Statement_Processor" target="_blank">📂 GitHub Repository</a>
+      <a href="https://colab.research.google.com/drive/15azpbyehCWpjAySUW7SfZDdWPujul00B" target="_blank">🐍 Colab Notebook</a>
+    </div>
+    
+    <footer>
+      <p>Script ID: ${SCRIPT_ID}</p>
+      <p>© 2026 Bank Statement Processor - Powered by Google Apps Script</p>
+    </footer>
+  </div>
+</body>
+</html>
+  `;
+}
+
+console.log('✅ Web App Dashboard handlers loaded!');
