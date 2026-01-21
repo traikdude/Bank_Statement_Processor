@@ -1,0 +1,44 @@
+name: Deploy to Google Apps Script
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: 📦 Install Clasp
+      run: npm install -g @google/clasp
+      
+    - name: 🔐 Configure Clasp credentials
+      run: |
+        echo "$CLASPRC_JSON" > ~/.clasprc.json
+      env:
+        CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        
+    - name: 🚀 Push to Apps Script
+      run: clasp push
+      
+    - name: 🌐 Deploy as Web App
+      if: github.event_name == 'push'
+      run: |
+        DEPLOYMENT_ID=$(clasp deploy --description "Automated deployment $(date +%Y-%m-%d_%H:%M:%S)" | grep -oP '(?<=@)\w+')
+        echo "DEPLOYMENT_ID=$DEPLOYMENT_ID" >> $GITHUB_ENV
+        
+    - name: 📊 Update README with deployment URL
+      if: github.event_name == 'push'
+      run: |
+        # Placeholder for README update logic
+        echo "Deployed to ID: $DEPLOYMENT_ID"
