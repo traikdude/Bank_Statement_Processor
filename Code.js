@@ -183,55 +183,177 @@ function onInstall(e) {
 // =============================================================================
 
 /**
- * Extracts text from PDF using Drive OCR
- * @param {File} pdfFile - The PDF file
- * @returns {string} Extracted text
+ * Extracts text from PDF using multiple methods with fallbacks
+ * Method 1: Drive API v2 OCR (primary)
+ * Method 2: Google Docs conversion via URL
+ * Method 3: Direct blob text extraction (text-based PDFs only)
+ * 
+ * @param {File} pdfFile - The PDF file from DriveApp
+ * @returns {string} Extracted text content
+ * @throws {Error} If all extraction methods fail
  */
 function extractTextFromPDF(pdfFile) {
-  try {
-    console.log('📄 Extracting text from:', pdfFile.getName());
-    const startTime = new Date().getTime();
+  const fileName = pdfFile.getName();
+  const fileId = pdfFile.getId();
+  console.log('📄 Starting PDF extraction for:', fileName);
+  console.log('📋 File ID:', fileId);
+  const startTime = new Date().getTime();
 
-    // Create temporary Google Doc from PDF using OCR
+  // =========================================================================
+  // METHOD 1: Drive API v2 with OCR (Primary Method)
+  // =========================================================================
+  try {
+    console.log('🔄 Method 1: Drive API v2 OCR conversion...');
+
+    const blob = pdfFile.getBlob();
     const resource = {
-      title: pdfFile.getName().replace('.pdf', '_temp_ocr'),
+      title: fileName.replace('.pdf', '_ocr_temp_' + Date.now()),
       mimeType: MimeType.GOOGLE_DOCS
     };
 
+    // Drive.Files.insert is v2 API - uses OCR parameter
+    const ocrOptions = {
+      ocr: true,
+      ocrLanguage: 'en'
+    };
+
+    const tempDoc = Drive.Files.insert(resource, blob, ocrOptions);
+
+    if (tempDoc && tempDoc.id) {
+      console.log('✅ OCR document created:', tempDoc.id);
+
+      // Read the converted document
+      const doc = DocumentApp.openById(tempDoc.id);
+      const body = doc.getBody();
+      const text = body.getText();
+
+      // Clean up temp document
+      try {
+        DriveApp.getFileById(tempDoc.id).setTrashed(true);
+        console.log('🗑️ Temp document cleaned up');
+      } catch (cleanupError) {
+        console.warn('⚠️ Could not clean up temp doc:', cleanupError.message);
+      }
+
+      const duration = ((new Date().getTime() - startTime) / 1000).toFixed(2);
+      console.log('✅ Method 1 SUCCESS - Extracted', text.length, 'chars in', duration, 's');
+
+      if (text && text.trim().length > 50) {
+        return text;
+      } else {
+        console.warn('⚠️ Method 1 returned insufficient text, trying fallback...');
+      }
+    }
+  } catch (error) {
+    console.error('❌ Method 1 failed:', error.message);
+    console.log('🔄 Trying fallback methods...');
+  }
+
+  // =========================================================================
+  // METHOD 2: Copy to Google Docs via DriveApp (Alternative OCR)
+  // =========================================================================
+  try {
+    console.log('🔄 Method 2: DriveApp copy with MIME type conversion...');
+
     const blob = pdfFile.getBlob();
-    const tempDoc = Drive.Files.insert(resource, blob, { ocr: true, ocrLanguage: 'en' });
+    blob.setName(fileName.replace('.pdf', ''));
 
-    console.log('🔄 OCR conversion complete, reading text...');
+    // Create a Google Doc from the PDF blob
+    const tempDocFile = DriveApp.createFile(blob);
+    const tempDocId = tempDocFile.getId();
 
-    // Get document content
-    const doc = DocumentApp.openById(tempDoc.id);
-    const text = doc.getBody().getText();
+    // Try to open as Google Doc (may work for some PDFs)
+    try {
+      // Get the file and convert to Google Docs
+      const copiedFile = Drive.Files.copy(
+        { title: fileName.replace('.pdf', '_converted'), mimeType: MimeType.GOOGLE_DOCS },
+        fileId,
+        { ocr: true, ocrLanguage: 'en' }
+      );
 
-    console.log('📝 PDF Text Length:', text.length, 'characters');
+      if (copiedFile && copiedFile.id) {
+        const doc = DocumentApp.openById(copiedFile.id);
+        const text = doc.getBody().getText();
 
-    // Clean up temporary document
-    DriveApp.getFileById(tempDoc.id).setTrashed(true);
+        // Cleanup
+        DriveApp.getFileById(copiedFile.id).setTrashed(true);
+        DriveApp.getFileById(tempDocId).setTrashed(true);
 
-    const duration = ((new Date().getTime() - startTime) / 1000).toFixed(2);
-    console.log('✅ Text extraction completed in', duration, 'seconds');
+        const duration = ((new Date().getTime() - startTime) / 1000).toFixed(2);
+        console.log('✅ Method 2 SUCCESS - Extracted', text.length, 'chars in', duration, 's');
 
-    return text;
+        if (text && text.trim().length > 50) {
+          return text;
+        }
+      }
+    } catch (copyError) {
+      console.warn('⚠️ Method 2 copy failed:', copyError.message);
+    }
+
+    // Cleanup temp file
+    tempDocFile.setTrashed(true);
 
   } catch (error) {
-    console.error('❌ PDF extraction error:', error);
-
-    // Fallback attempt for text-based PDFs
-    try {
-      console.log('🔄 Attempting fallback extraction...');
-      const blob = pdfFile.getBlob();
-      const text = blob.getDataAsString();
-      console.log('✅ Fallback successful, text length:', text.length);
-      return text;
-    } catch (fallbackError) {
-      console.error('❌ Fallback also failed:', fallbackError);
-      throw new Error('Could not extract text from PDF: ' + error.message);
-    }
+    console.error('❌ Method 2 failed:', error.message);
   }
+
+  // =========================================================================
+  // METHOD 3: Direct blob text extraction (text-based PDFs only)
+  // =========================================================================
+  try {
+    console.log('🔄 Method 3: Direct blob text extraction...');
+
+    const blob = pdfFile.getBlob();
+    const bytes = blob.getBytes();
+
+    // Try to extract text directly from PDF bytes
+    // This works for text-based PDFs (not scanned images)
+    let text = '';
+
+    try {
+      text = blob.getDataAsString('UTF-8');
+    } catch (e) {
+      text = blob.getDataAsString('ISO-8859-1');
+    }
+
+    // Clean up common PDF artifacts
+    text = text.replace(/[\x00-\x1F\x7F-\x9F]/g, ' ');
+    text = text.replace(/\s+/g, ' ');
+
+    // Look for readable content between stream markers
+    const streamMatches = text.match(/stream[\s\S]*?endstream/g);
+    if (streamMatches) {
+      let extractedContent = '';
+      for (const stream of streamMatches) {
+        // Extract text between parentheses (PDF text objects)
+        const textMatches = stream.match(/\(([^)]+)\)/g);
+        if (textMatches) {
+          extractedContent += textMatches.map(m => m.slice(1, -1)).join(' ') + ' ';
+        }
+      }
+      if (extractedContent.length > 100) {
+        text = extractedContent;
+      }
+    }
+
+    const duration = ((new Date().getTime() - startTime) / 1000).toFixed(2);
+    console.log('✅ Method 3 extracted', text.length, 'chars in', duration, 's');
+
+    if (text && text.trim().length > 50) {
+      return text.trim();
+    }
+
+  } catch (error) {
+    console.error('❌ Method 3 failed:', error.message);
+  }
+
+  // =========================================================================
+  // ALL METHODS FAILED
+  // =========================================================================
+  const duration = ((new Date().getTime() - startTime) / 1000).toFixed(2);
+  const errorMsg = `All PDF extraction methods failed for "${fileName}" after ${duration}s`;
+  console.error('❌ ' + errorMsg);
+  throw new Error(errorMsg);
 }
 
 /**
