@@ -2098,7 +2098,7 @@ function openColabNotebook() {
 }
 
 function openGitHubRepo() {
-  const url = 'https://github.com/<USERNAME>/GAS_Master_Project';
+  const url = 'https://github.com/traikdude/Bank_Statement_Processor';
   const htmlOutput = HtmlService
     .createHtmlOutput('<script>window.open("' + url + '", "_blank"); google.script.host.close();</script>')
     .setWidth(100)

@@ -20,8 +20,8 @@
 ### Local Development
 ```bash
 # Clone this repository
-git clone https://github.com/<USERNAME>/GAS_Master_Project.git
-cd GAS_Master_Project
+git clone https://github.com/traikdude/Bank_Statement_Processor.git
+cd Bank_Statement_Processor
 
 # Login to Clasp
 clasp login
